@@ -52,7 +52,7 @@ switch (cmd) {
   case 'stop':   require('./stop.js'); break;
   case 'send':   require('./send.js')(false, args); break;
   case 'think':  require('./send.js')(true, args); break;
-  case 'chat':   require('./chat.js'); break;
+  case 'chat':   require('./chat.js')(args); break;
   default:
     console.error(`❌ Unknown command: ${cmd}\n`);
     printHelp();
