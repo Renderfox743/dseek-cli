@@ -1,6 +1,6 @@
 {
   "name": "dseek-cli",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Unofficial CLI + OpenAI-compatible server for DSeek (DeepSeek) — web-scraped, uses your own browser session. Not affiliated with DeepSeek.",
   "main": "cli/ds.js",
   "bin": {
