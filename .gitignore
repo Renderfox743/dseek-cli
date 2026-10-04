@@ -1,0 +1,6 @@
+node_modules/
+chrome-data/
+.dseek/
+*.tgz
+*.log
+.DS_Store

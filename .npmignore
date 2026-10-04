@@ -1,0 +1,8 @@
+node_modules/
+chrome-data/
+.dseek/
+package-lock.json
+*.tgz
+*.log
+.DS_Store
+.git/
