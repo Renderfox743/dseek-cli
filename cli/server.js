@@ -52,6 +52,7 @@ function buildPrompt(messages) {
 (async () => {
   console.log('🚀 DSeek OpenAI-compatible server\n');
 
+  // ---------- Port ----------
   const portStr = await ask('Port [8080]: ');
   const port = parseInt(portStr.trim() || '8080', 10);
   if (!port || port < 1 || port > 65535) {
@@ -59,10 +60,43 @@ function buildPrompt(messages) {
     process.exit(1);
   }
 
+  // ---------- Bind address ----------
+  console.log('\n📡 Bind address — who can connect?\n');
+  console.log('   127.0.0.1   → local only. Only apps on THIS machine can reach the server.');
+  console.log('                 Use this if you\'re running the client on the same box,');
+  console.log('                 or if you\'re tunneling via SSH / zrok / cloudflared.');
+  console.log('                 Not reachable over the internet.\n');
+  console.log('   0.0.0.0     → public. Anyone who can reach this machine\'s IP can hit the server.');
+  console.log('                 Use this if you want to expose the API directly on a VPS');
+  console.log('                 (after opening the port in the firewall / security list).');
+  console.log('                 ⚠️  Your API key becomes the ONLY line of defense.\n');
+  console.log('   192.168.x.x, 10.x.x.x, etc.');
+  console.log('               → bind to a single interface (e.g. LAN). Reachable only from');
+  console.log('                 that network.\n');
+
+  const hostStr = await ask('Bind address [127.0.0.1]: ');
+  const host = hostStr.trim() || '127.0.0.1';
+
+  // ---------- API key ----------
+  console.log('\n🔐 API key');
+  console.log('   Leave empty to disable auth (only safe on 127.0.0.1).');
+  console.log('   If you bind to 0.0.0.0, ALWAYS set a key.\n');
   const keyStr = await ask('API key (leave empty to disable auth): ');
   const apiKey = keyStr.trim();
+
+  if (host === '0.0.0.0' && !apiKey) {
+    console.log('\n⚠️  WARNING: binding to 0.0.0.0 with no API key.');
+    console.log('   Anyone on the internet can use your DeepSeek session.');
+    const confirm = await ask('   Type "yes" to continue anyway: ');
+    if (confirm.trim().toLowerCase() !== 'yes') {
+      console.log('Aborted.');
+      process.exit(0);
+    }
+  }
+
   rl.close();
 
+  // ---------- Launch ----------
   console.log('\n🔧 Launching browser...');
   const browser = await browserLib.launchBrowser();
 
@@ -77,8 +111,9 @@ function buildPrompt(messages) {
 
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, skip_zrok_interstitial');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Max-Age', '86400');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     if (apiKey) {
@@ -154,18 +189,14 @@ function buildPrompt(messages) {
         'X-Accel-Buffering': 'no',
       });
 
-      // Role announcement (OpenAI spec)
+      // Role announcement
       res.write(`data: ${JSON.stringify({
         id, object: 'chat.completion.chunk', created, model,
         choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
       })}\n\n`);
 
-      // We hold the last-emitted length to only send *incremental* new text.
-      // The browser-side `sendOnPage` already calls onChunk with the delta,
-      // but we track state here too as a safety net against duplicates.
       let emittedLength = 0;
       const sendDelta = (fullTextSoFar) => {
-        // fullTextSoFar is the cumulative text (not delta) — we diff it
         const clean = String(fullTextSoFar || '').replace(/FINISHED/g, '');
         if (clean.length <= emittedLength) return;
         const delta = clean.substring(emittedLength);
@@ -176,8 +207,6 @@ function buildPrompt(messages) {
         })}\n\n`);
       };
 
-      // sendOnPage will call onChunk with a *delta* — but we normalize by
-      // accumulating locally and re-diffing. This kills any upstream dupes.
       let accumulated = '';
       const onChunk = (piece) => {
         accumulated += piece;
@@ -185,11 +214,8 @@ function buildPrompt(messages) {
       };
 
       const finalText = await browserLib.sendOnPage(page, prompt, useThinking, onChunk);
-
-      // Make sure everything is flushed (in case onChunk missed the tail)
       sendDelta(finalText);
 
-      // Final chunk
       res.write(`data: ${JSON.stringify({
         id, object: 'chat.completion.chunk', created, model,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
@@ -220,12 +246,20 @@ function buildPrompt(messages) {
     }
   }
 
-  server.listen(port, '127.0.0.1', () => {
-    console.log(`✅ Server on http://127.0.0.1:${port}`);
-    console.log(`   Auth: ${apiKey ? 'Bearer <key>' : 'disabled'}`);
+  server.listen(port, host, () => {
+    const isPublic = host === '0.0.0.0';
+    console.log(`✅ Server on http://${host}:${port}`);
+    console.log(`   Bind: ${host}${isPublic ? '  (public — anyone reachable)' : '  (local only)'}`);
+    console.log(`   Auth: ${apiKey ? 'Bearer <key>' : 'disabled ⚠️'}`);
     console.log(`   Models: chat, think`);
     console.log(`   Endpoint: POST /v1/chat/completions`);
-    console.log(`   Streaming: SSE\n`);
+    console.log(`   Streaming: SSE enabled\n`);
+    if (isPublic) {
+      console.log('🌍 Public URL:');
+      console.log(`   http://<your-public-ip>:${port}/v1`);
+      console.log('   Make sure the port is open in both your cloud security list');
+      console.log('   AND your OS firewall (ufw/iptables).\n');
+    }
     console.log('Ctrl+C to stop\n');
   });
 
